@@ -1,0 +1,85 @@
+{
+  "name": "workspace-maestro",
+  "displayName": "Workspace Maestro",
+  "description": "Conduct your multi-root workspace from the status bar: a one-click checklist to enable/disable (comment/uncomment) folders in your .code-workspace file.",
+  "version": "0.2.0",
+  "icon": "icon.png",
+  "publisher": "marcin-zajac",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/marcin-zajac/workspace-maestro"
+  },
+  "bugs": {
+    "url": "https://github.com/marcin-zajac/workspace-maestro/issues"
+  },
+  "homepage": "https://github.com/marcin-zajac/workspace-maestro",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "multi-root",
+    "workspace",
+    "folders",
+    "monorepo",
+    "status-bar",
+    "productivity",
+    "code-workspace",
+    "toggle"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "workspaceMaestro.show",
+        "title": "Toggle Workspace Folders",
+        "category": "Workspace Maestro"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "workspaceMaestro.show",
+        "key": "ctrl+k f",
+        "mac": "cmd+k f",
+        "when": "workbenchState == 'workspace'"
+      }
+    ],
+    "configuration": {
+      "title": "Workspace Maestro",
+      "properties": {
+        "workspaceMaestro.statusBarAlignment": {
+          "type": "string",
+          "enum": [
+            "left",
+            "right"
+          ],
+          "default": "right",
+          "description": "Which side of the status bar the Folders button appears on. Reload the window after changing."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "icon": "node scripts/generate-icon.mjs",
+    "test": "npm run compile && node test/run.mjs"
+  },
+  "dependencies": {
+    "jsonc-parser": "^3.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.80.0",
+    "@vscode/vsce": "^3.9.2",
+    "sharp": "^0.34.5",
+    "typescript": "^5.4.0"
+  }
+}

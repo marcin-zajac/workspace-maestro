@@ -1,0 +1,12 @@
+.vscode/**
+.claude/**
+src/**
+test/**
+scripts/**
+demo/**
+**/*.ts
+**/*.map
+tsconfig.json
+icon.svg
+.gitignore
+.git/**

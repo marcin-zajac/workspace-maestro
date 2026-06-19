@@ -1,0 +1,29 @@
+{
+	"folders": [
+		{
+			"name": "API",
+			"path": "packages/api"
+		},
+		{
+			"name": "Web App",
+			"path": "packages/web"
+		},
+		{
+			"name": "UI Kit",
+			"path": "packages/ui"
+		},
+		// {
+		// 	"name": "Docs",
+		// 	"path": "docs"
+		// },
+		// {
+		// 	"name": "Shared",
+		// 	"path": "packages/shared"
+		// }
+	],
+	"settings": {
+		"files.exclude": {
+			"**/.DS_Store": true
+		}
+	}
+}
