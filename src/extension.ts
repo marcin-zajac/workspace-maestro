@@ -12,8 +12,51 @@ let statusBarItem: vscode.StatusBarItem;
 let extensionContext: vscode.ExtensionContext;
 let isRestoring = false;
 let isExtensionWriting = false;
-let suppressWorkspaceSync = false;
 let pendingFolderChanges: FolderChanges | undefined;
+let restoreTimer: ReturnType<typeof setTimeout> | undefined;
+let suppressUntil = 0;
+
+/**
+ * Saving the `.code-workspace` file makes VS Code reload every folder, which
+ * fires `onDidChangeWorkspaceFolders` and a save event a moment later. This
+ * window lets us ignore those echoes of our own writes so we never loop.
+ */
+const SELF_EDIT_WINDOW_MS = 1500;
+const RESTORE_DEBOUNCE_MS = 300;
+
+/** True while we should ignore workspace events caused by our own edits. */
+function selfEditInProgress(): boolean {
+	return isExtensionWriting || isRestoring || Date.now() < suppressUntil;
+}
+
+/** Open the self-edit suppression window around a write we are about to make. */
+function markSelfEdit(): void {
+	suppressUntil = Date.now() + SELF_EDIT_WINDOW_MS;
+}
+
+/** Coalesce bursts of workspace events into a single debounced restore. */
+function requestRestore(): void {
+	if (restoreTimer) {
+		clearTimeout(restoreTimer);
+	}
+	restoreTimer = setTimeout(() => {
+		restoreTimer = undefined;
+		void scheduleRestore();
+	}, RESTORE_DEBOUNCE_MS);
+}
+
+function mergeChanges(
+	a: FolderChanges | undefined,
+	b: FolderChanges
+): FolderChanges {
+	if (!a) {
+		return b;
+	}
+	return {
+		added: [...a.added, ...b.added],
+		removed: [...a.removed, ...b.removed],
+	};
+}
 
 /** Set up the status-bar item, command, and the listeners that keep them current. */
 export function activate(context: vscode.ExtensionContext) {
@@ -37,24 +80,22 @@ export function activate(context: vscode.ExtensionContext) {
 
 		context.subscriptions.push(
 			vscode.workspace.onDidChangeWorkspaceFolders((event) => {
-				if (isExtensionWriting || isRestoring || suppressWorkspaceSync) {
+				if (selfEditInProgress()) {
 					return;
 				}
-				pendingFolderChanges = {
+				pendingFolderChanges = mergeChanges(pendingFolderChanges, {
 					added: event.added.map(folderPath),
 					removed: event.removed.map(folderPath),
-				};
-				void scheduleRestore();
+				});
+				requestRestore();
 			})
 		);
 		context.subscriptions.push(
 			vscode.workspace.onDidSaveTextDocument((d) => {
-				if (suppressWorkspaceSync || isExtensionWriting || isRestoring) {
+				if (selfEditInProgress() || !isWorkspaceFile(d.uri)) {
 					return;
 				}
-				if (isWorkspaceFile(d.uri)) {
-					void scheduleRestore();
-				}
+				requestRestore();
 			})
 		);
 
@@ -70,6 +111,10 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {
+	if (restoreTimer) {
+		clearTimeout(restoreTimer);
+		restoreTimer = undefined;
+	}
 	statusBarItem?.dispose();
 }
 
@@ -92,29 +137,37 @@ function fullDocumentRange(doc: vscode.TextDocument): vscode.Range {
 	);
 }
 
-function loadStoredState(): StoredState | undefined {
-	return extensionContext.workspaceState.get<StoredState>(stateKey());
-}
+let lastSavedSerialized: string | undefined;
 
-function saveStoredState(state: StoredState): void {
-	void extensionContext.workspaceState.update(stateKey(), state);
+function loadStoredState(): StoredState | undefined {
+	const state = extensionContext.workspaceState.get<StoredState>(stateKey());
+	if (state && lastSavedSerialized === undefined) {
+		lastSavedSerialized = JSON.stringify(state);
+	}
+	return state;
 }
 
 /**
- * VS Code saves the workspace file asynchronously after folder changes. Wait a
- * tick so restore reads the updated file contents.
+ * Persist folder state, but only when it actually changed. `workspaceState`
+ * is backed by VS Code's SQLite store; skipping no-op writes avoids hammering
+ * that database.
  */
+function saveStoredState(state: StoredState): void {
+	const serialized = JSON.stringify(state);
+	if (serialized === lastSavedSerialized) {
+		return;
+	}
+	lastSavedSerialized = serialized;
+	void extensionContext.workspaceState.update(stateKey(), state);
+}
+
+/** Restore disabled folders if needed, then refresh the status bar badge. */
 async function scheduleRestore(): Promise<void> {
 	try {
-		await new Promise((resolve) => setTimeout(resolve, 0));
 		await restoreIfNeeded();
 		await refreshStatusBar();
 	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
 		console.error('Workspace Maestro restore failed:', error);
-		void vscode.window.showErrorMessage(
-			`Workspace Maestro restore failed: ${message}`
-		);
 	}
 }
 
@@ -167,7 +220,7 @@ async function restoreIfNeeded(): Promise<void> {
 	}
 
 	isRestoring = true;
-	suppressWorkspaceSync = true;
+	markSelfEdit();
 	try {
 		const edit = new vscode.WorkspaceEdit();
 		edit.replace(doc.uri, fullDocumentRange(doc), result.text);
@@ -178,9 +231,7 @@ async function restoreIfNeeded(): Promise<void> {
 		await doc.save();
 	} finally {
 		isRestoring = false;
-		setTimeout(() => {
-			suppressWorkspaceSync = false;
-		}, 0);
+		markSelfEdit();
 	}
 }
 
@@ -300,7 +351,7 @@ async function writeWorkspace(doc: vscode.TextDocument, parsed: ParseResult) {
 		return;
 	}
 	isExtensionWriting = true;
-	suppressWorkspaceSync = true;
+	markSelfEdit();
 	try {
 		const edit = new vscode.WorkspaceEdit();
 		edit.replace(doc.uri, fullDocumentRange(doc), newText);
@@ -313,8 +364,6 @@ async function writeWorkspace(doc: vscode.TextDocument, parsed: ParseResult) {
 		saveStoredState(stateFromParse(parsed));
 	} finally {
 		isExtensionWriting = false;
-		setTimeout(() => {
-			suppressWorkspaceSync = false;
-		}, 0);
+		markSelfEdit();
 	}
 }

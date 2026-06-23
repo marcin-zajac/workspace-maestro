@@ -141,6 +141,11 @@ Bug reports and feature requests are welcome on the
 
 ## Release notes
 
+### 0.2.2
+
+- Fix severe lag caused by a save/reload feedback loop on the workspace file.
+- Debounce workspace events and reliably ignore the extension's own edits.
+
 ### 0.2.1
 
 - Fix extension activation and status bar not appearing after workspace restore.
