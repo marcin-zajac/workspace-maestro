@@ -2,7 +2,7 @@
   "name": "workspace-maestro",
   "displayName": "Workspace Maestro",
   "description": "Conduct your multi-root workspace from the status bar: a one-click checklist to enable/disable (comment/uncomment) folders in your .code-workspace file.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "icon": "icon.png",
   "publisher": "marcin-zajac",
   "license": "MIT",
@@ -31,7 +31,8 @@
     "toggle"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onCommand:workspaceMaestro.show"
   ],
   "main": "./out/extension.js",
   "contributes": {

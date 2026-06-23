@@ -12,48 +12,61 @@ let statusBarItem: vscode.StatusBarItem;
 let extensionContext: vscode.ExtensionContext;
 let isRestoring = false;
 let isExtensionWriting = false;
+let suppressWorkspaceSync = false;
 let pendingFolderChanges: FolderChanges | undefined;
 
 /** Set up the status-bar item, command, and the listeners that keep them current. */
 export function activate(context: vscode.ExtensionContext) {
-	extensionContext = context;
+	try {
+		extensionContext = context;
 
-	const alignment =
-		vscode.workspace
-			.getConfiguration('workspaceMaestro')
-			.get<string>('statusBarAlignment') === 'left'
-			? vscode.StatusBarAlignment.Left
-			: vscode.StatusBarAlignment.Right;
+		const alignment =
+			vscode.workspace
+				.getConfiguration('workspaceMaestro')
+				.get<string>('statusBarAlignment') === 'left'
+				? vscode.StatusBarAlignment.Left
+				: vscode.StatusBarAlignment.Right;
 
-	statusBarItem = vscode.window.createStatusBarItem(alignment, 100);
-	statusBarItem.command = 'workspaceMaestro.show';
-	context.subscriptions.push(statusBarItem);
+		statusBarItem = vscode.window.createStatusBarItem(alignment, 100);
+		statusBarItem.command = 'workspaceMaestro.show';
+		context.subscriptions.push(statusBarItem);
 
-	context.subscriptions.push(
-		vscode.commands.registerCommand('workspaceMaestro.show', showPicker)
-	);
+		context.subscriptions.push(
+			vscode.commands.registerCommand('workspaceMaestro.show', showPicker)
+		);
 
-	context.subscriptions.push(
-		vscode.workspace.onDidChangeWorkspaceFolders((event) => {
-			if (isExtensionWriting || isRestoring) {
-				return;
-			}
-			pendingFolderChanges = {
-				added: event.added.map(folderPath),
-				removed: event.removed.map(folderPath),
-			};
-			void scheduleRestore();
-		})
-	);
-	context.subscriptions.push(
-		vscode.workspace.onDidSaveTextDocument((d) => {
-			if (isWorkspaceFile(d.uri)) {
+		context.subscriptions.push(
+			vscode.workspace.onDidChangeWorkspaceFolders((event) => {
+				if (isExtensionWriting || isRestoring || suppressWorkspaceSync) {
+					return;
+				}
+				pendingFolderChanges = {
+					added: event.added.map(folderPath),
+					removed: event.removed.map(folderPath),
+				};
 				void scheduleRestore();
-			}
-		})
-	);
+			})
+		);
+		context.subscriptions.push(
+			vscode.workspace.onDidSaveTextDocument((d) => {
+				if (suppressWorkspaceSync || isExtensionWriting || isRestoring) {
+					return;
+				}
+				if (isWorkspaceFile(d.uri)) {
+					void scheduleRestore();
+				}
+			})
+		);
 
-	void scheduleRestore();
+		void refreshStatusBar();
+		void scheduleRestore();
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		void vscode.window.showErrorMessage(
+			`Workspace Maestro failed to activate: ${message}`
+		);
+		throw error;
+	}
 }
 
 export function deactivate() {
@@ -71,6 +84,14 @@ function folderPath(folder: vscode.WorkspaceFolder): string {
 	return vscode.workspace.asRelativePath(folder.uri, false);
 }
 
+function fullDocumentRange(doc: vscode.TextDocument): vscode.Range {
+	const lastLine = Math.max(0, doc.lineCount - 1);
+	return new vscode.Range(
+		new vscode.Position(0, 0),
+		doc.lineAt(lastLine).range.end
+	);
+}
+
 function loadStoredState(): StoredState | undefined {
 	return extensionContext.workspaceState.get<StoredState>(stateKey());
 }
@@ -84,9 +105,17 @@ function saveStoredState(state: StoredState): void {
  * tick so restore reads the updated file contents.
  */
 async function scheduleRestore(): Promise<void> {
-	await new Promise((resolve) => setTimeout(resolve, 0));
-	await restoreIfNeeded();
-	await refreshStatusBar();
+	try {
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		await restoreIfNeeded();
+		await refreshStatusBar();
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		console.error('Workspace Maestro restore failed:', error);
+		void vscode.window.showErrorMessage(
+			`Workspace Maestro restore failed: ${message}`
+		);
+	}
 }
 
 /**
@@ -138,13 +167,10 @@ async function restoreIfNeeded(): Promise<void> {
 	}
 
 	isRestoring = true;
+	suppressWorkspaceSync = true;
 	try {
-		const fullRange = new vscode.Range(
-			new vscode.Position(0, 0),
-			doc.lineAt(doc.lineCount - 1).range.end
-		);
 		const edit = new vscode.WorkspaceEdit();
-		edit.replace(doc.uri, fullRange, result.text);
+		edit.replace(doc.uri, fullDocumentRange(doc), result.text);
 		const ok = await vscode.workspace.applyEdit(edit);
 		if (!ok) {
 			return;
@@ -152,6 +178,9 @@ async function restoreIfNeeded(): Promise<void> {
 		await doc.save();
 	} finally {
 		isRestoring = false;
+		setTimeout(() => {
+			suppressWorkspaceSync = false;
+		}, 0);
 	}
 }
 
@@ -181,6 +210,9 @@ async function readWorkspace(): Promise<
 
 /** Refresh the `enabled/total` badge, hiding the item when there is nothing to show. */
 async function refreshStatusBar() {
+	if (!statusBarItem) {
+		return;
+	}
 	const result = await readWorkspace();
 	if (!result) {
 		statusBarItem.hide();
@@ -268,13 +300,10 @@ async function writeWorkspace(doc: vscode.TextDocument, parsed: ParseResult) {
 		return;
 	}
 	isExtensionWriting = true;
+	suppressWorkspaceSync = true;
 	try {
-		const fullRange = new vscode.Range(
-			new vscode.Position(0, 0),
-			doc.lineAt(doc.lineCount - 1).range.end
-		);
 		const edit = new vscode.WorkspaceEdit();
-		edit.replace(doc.uri, fullRange, newText);
+		edit.replace(doc.uri, fullDocumentRange(doc), newText);
 		const ok = await vscode.workspace.applyEdit(edit);
 		if (!ok) {
 			vscode.window.showErrorMessage('Failed to update the workspace file.');
@@ -284,5 +313,8 @@ async function writeWorkspace(doc: vscode.TextDocument, parsed: ParseResult) {
 		saveStoredState(stateFromParse(parsed));
 	} finally {
 		isExtensionWriting = false;
+		setTimeout(() => {
+			suppressWorkspaceSync = false;
+		}, 0);
 	}
 }

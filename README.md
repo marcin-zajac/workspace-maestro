@@ -141,6 +141,11 @@ Bug reports and feature requests are welcome on the
 
 ## Release notes
 
+### 0.2.1
+
+- Fix extension activation and status bar not appearing after workspace restore.
+- Prevent save/restore loop when the workspace file is updated internally.
+
 ### 0.2.0
 
 - Disabled folders restored automatically after VS Code rewrites the workspace
